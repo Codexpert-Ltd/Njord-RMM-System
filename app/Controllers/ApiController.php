@@ -26,13 +26,15 @@ class ApiController extends ResourceController
         $gateway_data = [
             'id'       => $gw_data->id,
             'status_data'       => $this->BasicFunctions->Convert_Status_Data($gw_data->status_data),
-            'motor_data'       => $gw_data->motor_data,
+            'motor_data'       => $this->BasicFunctions->Convert_Motor_Data($gw_data->motor_data),
+            'shamsi_date'        => $this->BasicFunctions->shamsi_date('Y-m-d , H:i',time(), 0),
             'serial'       => $gw_data->serial,
             'imsi'        => $gw_data->imsi,
             'imei'        => $gw_data->imei,
             'softversion'        => $gw_data->softversion,
             'configstat'        => $gw_data->configstat,
-            'last_connection'        => $gw_data->reg_date,
+            'last_connection'        => $gw_data->shamsi_date,
+            'location'        => $gw_data->location,
         ];
 
 
@@ -61,7 +63,7 @@ class ApiController extends ResourceController
                 $payload = [
                     'time' => time(),
                     'username' => $data->username,
-                    'exp' => time() + 3600,
+                    'exp' => time() + 864000,
                 ];
                 $token = JWT::encode($payload, $key, 'HS256');
                 return $this->respond(['user' => $data->username, 'token' => $token]);
@@ -129,6 +131,7 @@ class ApiController extends ResourceController
                 'imei'        => $data->imei,
                 'softversion'        => $data->softversion,
                 'configstat'        => $data->configstat,
+                'shamsi_date'        => $this->BasicFunctions->shamsi_date('Y-m-d , H:i',time(), 0),
             ];
             if ( $old_status_data != $data->status_data) {
                 $alertquery = $db->table('customalerts');
@@ -136,6 +139,7 @@ class ApiController extends ResourceController
                     'status_data'       => $data->status_data,
                     'motor_data'       => $data->motor_data,
                     'serial'       => $data->serial,
+                    'shamsi_date'        => $this->BasicFunctions->shamsi_date('Y-m-d , H:i',time(), 0),
                 ];
                 $alertquery->insert($alert_gateway_data);
             }
@@ -151,6 +155,8 @@ class ApiController extends ResourceController
                 'imei'        => $data->imei,
                 'softversion'        => $data->softversion,
                 'configstat'        => $data->configstat,
+                'shamsi_date'        => $this->BasicFunctions->shamsi_date('Y-m-d , H:i',time(), 0),
+                'first_connection'        => $this->BasicFunctions->shamsi_date('Y-m-d , H:i',time(), 0),
             ];
             $query->insert($gateway_data); 
             return $this->respond(['serial' => $data->serial, 'status' => "new gateway inserted"]);
@@ -176,7 +182,7 @@ class ApiController extends ResourceController
             $alarms = $querycheck->getResultArray();
             foreach ($alarms as &$object) {
                 $status_data = $object['status_data'];
-                $result = $this->BasicFunctions->Convert_Status_Data($status_data);
+                $result = $this->BasicFunctions->Convert_Status_Data_Alaram($status_data);
                 $object['status_data'] = $result;
             }
         return $this->respond(['serial' => $data->serial, 'alaram' => $alarms ]);
@@ -212,5 +218,52 @@ class ApiController extends ResourceController
 
     }
 
+    public function Get_Alerts_Count() {
+
+        $data = $this->request->getJSON();
+        $db = \Config\Database::connect();
+        $db->connect();
+        $querycheck = $db->table('customalerts')
+        ->select("DATE_FORMAT(shamsi_date, '%Y-%m-%d') AS formatted_date, SUM(1) AS count")
+        ->where('shamsi_date >=', $data->start_date)
+        ->where('shamsi_date <=', $data->end_date)
+        ->groupBy('formatted_date, MONTH(shamsi_date), DAY(shamsi_date)')
+        ->orderBy('formatted_date, MONTH(shamsi_date), DAY(shamsi_date)')
+        ->get();
+         $results = $querycheck->getResult();
+
+         return $this->respond(['count' => $results ]);
+
+    }
+
   
+
+    public function Get_Gateways_Count() {
+
+        $data = $this->request->getJSON();
+        $db = \Config\Database::connect();
+        $db->connect();
+        if ( $data->all_time == "1" ){
+            $querycheck = $db->table('customgateways')
+            ->select('COUNT(*) AS row_count')
+            ->where("STR_TO_DATE(CONCAT(SUBSTRING_INDEX(first_connection, ' , ', 1), ' ', SUBSTRING_INDEX(first_connection, ' , ', -1)), '%Y-%m-%d %H:%i') BETWEEN '{$data->start_date} {$data->start_time}' AND '{$data->end_date} {$data->end_time}'")
+            ->get();
+             $results = $querycheck->getResult();
+
+        }else {
+            $querycheck = $db->table('customgateways')
+            ->select("DATE_FORMAT(STR_TO_DATE(CONCAT(SUBSTRING_INDEX(first_connection, ' , ', 1), ' ', SUBSTRING_INDEX(first_connection, ' , ', -1)), '%Y-%m-%d %H:%i'), '%Y-%m') AS month, COUNT(*) AS row_count")
+            ->where("STR_TO_DATE(CONCAT(SUBSTRING_INDEX(first_connection, ' , ', 1), ' ', SUBSTRING_INDEX(first_connection, ' , ', -1)), '%Y-%m-%d %H:%i') BETWEEN '{$data->start_date} {$data->start_time}' AND '{$data->end_date} {$data->end_time}'")
+            ->groupBy('month')
+            ->orderBy('month')
+            ->get();
+             $results = $querycheck->getResult();
+         } 
+
+
+         return $this->respond(['count' => $results ]);
+
+    }
+
+
 }
